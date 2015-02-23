@@ -209,6 +209,17 @@ pub fn decl_fn(ccx: &CrateContext, name: &str, cc: llvm::CallConv,
         set_split_stack(llfn);
     }
 
+    match ccx.sess().opts.size_optimize {
+        config::SizeOptOff => {},
+        config::SizeOptOn => {
+            set_optimize_for_size(llfn);
+        },
+        config::SizeOptMax => {
+            set_optimize_for_size(llfn);
+            set_min_size(llfn);
+        }
+    }
+
     llfn
 }
 
@@ -408,9 +419,16 @@ pub fn get_tydesc<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
     inf
 }
 
-#[allow(dead_code)] // useful
 pub fn set_optimize_for_size(f: ValueRef) {
     llvm::SetFunctionAttribute(f, llvm::OptimizeForSizeAttribute)
+}
+
+pub fn set_min_size(f: ValueRef) {
+    unsafe {
+        llvm::LLVMAddFunctionAttribute(f,
+                                       llvm::FunctionIndex as c_uint,
+                                       llvm::MinSizeAttribute as uint64_t)
+    }
 }
 
 pub fn set_no_inline(f: ValueRef) {

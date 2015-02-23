@@ -262,6 +262,7 @@ struct ModuleConfig {
     /// Some(level) to optimize at a certain level, or None to run
     /// absolutely no optimizations (used for the metadata module).
     opt_level: Option<llvm::CodeGenOptLevel>,
+    size_opt_level: u32,
 
     // Flags indicating which outputs to produce.
     emit_no_opt_bc: bool,
@@ -287,6 +288,7 @@ impl ModuleConfig {
             tm: tm,
             passes: passes,
             opt_level: None,
+            size_opt_level: 0,
 
             emit_no_opt_bc: false,
             emit_bc: false,
@@ -449,6 +451,7 @@ unsafe fn optimize_and_codegen(cgcx: &CodegenContext,
                 llvm::LLVMRustAddAnalysisPasses(tm, fpm, llmod);
                 llvm::LLVMRustAddAnalysisPasses(tm, mpm, llmod);
                 populate_llvm_passes(fpm, mpm, llmod, opt_level,
+                                     config.size_opt_level,
                                      config.no_builtins);
             }
 
@@ -577,6 +580,11 @@ pub fn run_passes(sess: &Session,
     let mut metadata_config = ModuleConfig::new(tm, vec!());
 
     modules_config.opt_level = Some(get_llvm_opt_level(sess.opts.optimize));
+    modules_config.size_opt_level = match sess.opts.size_optimize {
+        config::SizeOptOff => 0,
+        config::SizeOptOn => 1,
+        config::SizeOptMax => 2
+    };
 
     // Save all versions of the bytecode if we're saving our temporaries.
     if sess.opts.cg.save_temps {
@@ -998,9 +1006,11 @@ unsafe fn configure_llvm(sess: &Session) {
     // slp vectorization at O3
     let vectorize_loop = !sess.opts.cg.no_vectorize_loops &&
                          (sess.opts.optimize == config::Default ||
-                          sess.opts.optimize == config::Aggressive);
+                          sess.opts.optimize == config::Aggressive) &&
+                         sess.opts.size_optimize == config::SizeOptOff;
     let vectorize_slp = !sess.opts.cg.no_vectorize_slp &&
-                        sess.opts.optimize == config::Aggressive;
+                        sess.opts.optimize == config::Aggressive &&
+                        sess.opts.size_optimize == config::SizeOptOff;
 
     let mut llvm_c_strs = Vec::new();
     let mut llvm_args = Vec::new();
@@ -1070,6 +1080,7 @@ unsafe fn populate_llvm_passes(fpm: llvm::PassManagerRef,
                                mpm: llvm::PassManagerRef,
                                llmod: ModuleRef,
                                opt: llvm::CodeGenOptLevel,
+                               size_opt: u32,
                                no_builtins: bool) {
     // Create the PassManagerBuilder for LLVM. We configure it with
     // reasonable defaults and prepare it to actually populate the pass
@@ -1083,10 +1094,18 @@ unsafe fn populate_llvm_passes(fpm: llvm::PassManagerRef,
         llvm::CodeGenLevelLess => {
             llvm::LLVMRustAddAlwaysInlinePass(builder, true);
         }
-        // numeric values copied from clang
+        // numeric values copied from clang (computeThresholdFromOptLevels,
+        // llvm/lib/Transforms/IPO/InlineSimple.cpp)
         llvm::CodeGenLevelDefault => {
+            let threshold = match size_opt {
+                0 => 225,   // -O2
+                1 => 75,    // -Os
+                2 => 25,    // -Oz
+                // XXX: This panic is ugly; replace with an enum type?
+                _ => panic!("expected size_opt between 0-2, found {}", size_opt)
+            };
             llvm::LLVMPassManagerBuilderUseInlinerWithThreshold(builder,
-                                                                225);
+                                                                threshold);
         }
         llvm::CodeGenLevelAggressive => {
             llvm::LLVMPassManagerBuilderUseInlinerWithThreshold(builder,
@@ -1094,6 +1113,7 @@ unsafe fn populate_llvm_passes(fpm: llvm::PassManagerRef,
         }
     }
     llvm::LLVMPassManagerBuilderSetOptLevel(builder, opt as c_uint);
+    llvm::LLVMPassManagerBuilderSetSizeLevel(builder, size_opt as c_uint);
     llvm::LLVMRustAddBuilderLibraryInfo(builder, llmod, no_builtins);
 
     // Use the builder to populate the function/module pass managers.

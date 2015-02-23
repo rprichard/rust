@@ -15,6 +15,7 @@ pub use self::EntryFnType::*;
 pub use self::CrateType::*;
 pub use self::Passes::*;
 pub use self::OptLevel::*;
+pub use self::SizeOptLevel::*;
 pub use self::OutputType::*;
 pub use self::DebugInfoLevel::*;
 
@@ -56,6 +57,13 @@ pub enum OptLevel {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+pub enum SizeOptLevel {
+    SizeOptOff, // -O0
+    SizeOptOn, // -Os
+    SizeOptMax, // -Oz
+}
+
+#[derive(Clone, Copy, PartialEq)]
 pub enum DebugInfoLevel {
     NoDebugInfo,
     LimitedDebugInfo,
@@ -80,6 +88,7 @@ pub struct Options {
 
     pub gc: bool,
     pub optimize: OptLevel,
+    pub size_optimize: SizeOptLevel,
     pub debuginfo: DebugInfoLevel,
     pub lint_opts: Vec<(String, lint::Level)>,
     pub describe_lints: bool,
@@ -213,6 +222,7 @@ pub fn basic_options() -> Options {
         crate_types: Vec::new(),
         gc: false,
         optimize: No,
+        size_optimize: SizeOptOff,
         debuginfo: NoDebugInfo,
         lint_opts: Vec::new(),
         describe_lints: false,
@@ -526,6 +536,8 @@ options! {CodegenOptions, CodegenSetter, basic_codegen_options,
          2 = full debug info with variable and type information"),
     opt_level: Option<uint> = (None, parse_opt_uint,
         "Optimize with possible levels 0-3"),
+    size_opt_level: Option<uint> = (None, parse_opt_uint,
+        "Optimize for size with possible levels 0-2"),
 }
 
 
@@ -905,10 +917,20 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
             if cg.opt_level.is_some() {
                 early_error("-O and -C opt-level both provided");
             }
+            if cg.size_opt_level.is_some() {
+                early_error("-O and -C size-opt-level both provided");
+            }
             Default
         } else {
+            if cg.opt_level.is_some() && cg.size_opt_level.is_some() {
+                early_error("-C opt-level and -C size-opt-level both provided");
+            }
             match cg.opt_level {
-                None => No,
+                None => match cg.size_opt_level {
+                    None => No,
+                    Some(0) => No,
+                    Some(_) => Default,
+                },
                 Some(0) => No,
                 Some(1) => Less,
                 Some(2) => Default,
@@ -919,6 +941,17 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
                                          arg));
                 }
             }
+        }
+    };
+    let size_opt_level = match cg.size_opt_level {
+        None => SizeOptOff,
+        Some(0) => SizeOptOff,
+        Some(1) => SizeOptOn,
+        Some(2) => SizeOptMax,
+        Some(arg) => {
+            early_error(&format!("size optimization level needs to be \
+                                  between 0-2 (instead was `{}`)",
+                                  arg));
         }
     };
     let gc = debugging_opts.gc;
@@ -1038,6 +1071,7 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         crate_types: crate_types,
         gc: gc,
         optimize: opt_level,
+        size_optimize: size_opt_level,
         debuginfo: debuginfo,
         lint_opts: lint_opts,
         describe_lints: describe_lints,

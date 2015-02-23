@@ -173,9 +173,15 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
             config::Default => 2,
             config::Aggressive => 3,
         };
+        let size_opt = match sess.opts.size_optimize {
+            config::SizeOptOff => 0,
+            config::SizeOptOn => 1,
+            config::SizeOptMax => 2,
+        };
 
         let builder = llvm::LLVMPassManagerBuilderCreate();
         llvm::LLVMPassManagerBuilderSetOptLevel(builder, opt);
+        llvm::LLVMPassManagerBuilderSetSizeLevel(builder, size_opt);
         llvm::LLVMPassManagerBuilderPopulateLTOPassManager(builder, pm,
             /* Internalize = */ False,
             /* RunInliner = */ True);

@@ -1644,7 +1644,7 @@ extern {
     pub fn LLVMPassManagerBuilderSetOptLevel(PMB: PassManagerBuilderRef,
                                              OptimizationLevel: c_uint);
     pub fn LLVMPassManagerBuilderSetSizeLevel(PMB: PassManagerBuilderRef,
-                                              Value: Bool);
+                                              SizeLevel: c_uint);
     pub fn LLVMPassManagerBuilderSetDisableUnitAtATime(
         PMB: PassManagerBuilderRef,
         Value: Bool);
