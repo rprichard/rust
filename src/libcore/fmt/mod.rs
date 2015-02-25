@@ -437,15 +437,13 @@ impl<'a> Formatter<'a> {
                         prefix: &str,
                         buf: &str)
                         -> Result {
-        use char::CharExt;
-
         let mut width = buf.len();
 
         let mut sign = None;
         if !is_positive {
-            sign = Some('-'); width += 1;
+            sign = Some(b'-'); width += 1;
         } else if self.flags & (1 << (FlagV1::SignPlus as u32)) != 0 {
-            sign = Some('+'); width += 1;
+            sign = Some(b'+'); width += 1;
         }
 
         let mut prefixed = false;
@@ -456,9 +454,8 @@ impl<'a> Formatter<'a> {
         // Writes the sign if it exists, and then the prefix if it was requested
         let write_prefix = |f: &mut Formatter| {
             if let Some(c) = sign {
-                let mut b = [0; 4];
-                let n = c.encode_utf8(&mut b).unwrap_or(0);
-                let b = unsafe { str::from_utf8_unchecked(&b[..n]) };
+                let b = [c];
+                let b = unsafe { str::from_utf8_unchecked(&b) };
                 try!(f.buf.write_str(b));
             }
             if prefixed { f.buf.write_str(prefix) }
