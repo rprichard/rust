@@ -207,6 +207,17 @@ impl<'a> Arguments<'a> {
             args: args
         }
     }
+
+    /// This function is used internally in `core::panicking` to reduce code
+    /// size for programs that never format a `str`.
+    #[doc(hidden)] #[inline]
+    pub fn new_v1_single_string(pieces: &'a [&'a str; 1]) -> Arguments<'a> {
+        Arguments {
+            pieces: pieces,
+            fmt: None,
+            args: &[]
+        }
+    }
 }
 
 /// This structure represents a safely precompiled version of a format string

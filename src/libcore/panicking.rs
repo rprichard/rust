@@ -36,7 +36,7 @@ use fmt;
 #[lang="panic"]
 pub fn panic(expr_file_line: &(&'static str, &'static str, u32)) -> ! {
     let (expr, file, line) = *expr_file_line;
-    panic_fmt(format_args!("{}", expr), &(file, line))
+    panic_fmt(fmt::Arguments::new_v1_single_string(&[expr]), &(file, line))
 }
 
 #[cold] #[inline(never)]
