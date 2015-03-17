@@ -73,7 +73,8 @@ $$(TLIB$(1)_T_$(2)_H_$(3))/stamp.$(4): \
 		$$(CRATEFILE_$(4)) \
 		$$(CRATE_FULLDEPS_$(1)_T_$(2)_H_$(3)_$(4)) \
 		$$(TSREQ$(1)_T_$(2)_H_$(3)) \
-		| $$(TLIB$(1)_T_$(2)_H_$(3))/
+		| $$(TLIB$(1)_T_$(2)_H_$(3))/ \
+		$$(LLVM_CONFIG_$(2))
 	@$$(call E, rustc: $$(@D)/lib$(4))
 	@touch $$@.start_time
 	$$(call REMOVE_ALL_OLD_GLOB_MATCHES, \
