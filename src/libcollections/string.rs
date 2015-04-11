@@ -996,6 +996,7 @@ pub trait ToString {
     fn to_string(&self) -> String;
 }
 
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: fmt::Display + ?Sized> ToString for T {
     #[inline]
@@ -1003,6 +1004,21 @@ impl<T: fmt::Display + ?Sized> ToString for T {
         use core::fmt::Write;
         let mut buf = String::new();
         let _ = buf.write_fmt(format_args!("{}", self));
+        buf.shrink_to_fit();
+        buf
+    }
+}
+
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T: fmt::Display + ?Sized> ToString for T {
+    #[inline]
+    fn to_string(&self) -> String {
+        let mut buf = String::new();
+        {
+            let mut fmt = fmt::Formatter::new(&mut buf);
+            let _ = fmt::Display::fmt(self, &mut fmt);
+        }
         buf.shrink_to_fit();
         buf
     }
