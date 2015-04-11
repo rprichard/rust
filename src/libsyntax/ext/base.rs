@@ -455,7 +455,7 @@ fn initial_syntax_expander_table<'feat>(ecfg: &expand::ExpansionConfig<'feat>)
     syntax_expanders.insert(intern("macro_rules"), MacroRulesTT);
     syntax_expanders.insert(intern("format_args"),
                             // format_args uses `unstable` things internally.
-                            NormalTT(Box::new(ext::format::expand_format_args), None, true));
+                            NormalTT(Box::new(ext::format2::expand_format_args), None, true));
     syntax_expanders.insert(intern("env"),
                             builtin_normal_expander(
                                     ext::env::expand_env));

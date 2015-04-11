@@ -421,7 +421,9 @@ pub use core::fmt::{Display, Debug};
 pub use core::fmt::{LowerHex, UpperHex, Pointer};
 pub use core::fmt::{LowerExp, UpperExp};
 pub use core::fmt::Error;
-pub use core::fmt::{ArgumentV1, Arguments, write, radix, Radix, RadixFmt};
+#[cfg(stage0)]
+pub use core::fmt::ArgumentV1;
+pub use core::fmt::{Arguments, write, radix, Radix, RadixFmt};
 
 use string;
 

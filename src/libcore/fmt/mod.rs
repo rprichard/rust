@@ -14,7 +14,10 @@
 
 use cell::{Cell, RefCell, Ref, RefMut, BorrowState};
 use char::CharExt;
+#[cfg(stage0)]
 use clone::Clone;
+#[cfg(not(stage0))]
+use default::Default;
 use iter::Iterator;
 use marker::{Copy, PhantomData, Sized};
 use mem;
@@ -22,11 +25,16 @@ use option::Option;
 use option::Option::{Some, None};
 use result::Result::Ok;
 use ops::{Deref, FnOnce};
+use raw;
 use result;
 use slice::SliceExt;
+#[cfg(stage0)]
 use slice;
 use str::{self, StrExt};
+#[cfg(stage0)]
 use self::rt::v1::Alignment;
+#[cfg(not(stage0))]
+use self::rt::v2::Alignment;
 
 pub use self::num::radix;
 pub use self::num::Radix;
@@ -41,7 +49,10 @@ mod builders;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(hidden)]
 pub mod rt {
+    #[cfg(stage0)]
     pub mod v1;
+    #[cfg(not(stage0))]
+    pub mod v2;
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -111,6 +122,7 @@ pub trait Write {
 /// A struct to represent both where to emit formatting strings to and how they
 /// should be formatted. A mutable version of this is passed to all formatting
 /// traits.
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Formatter<'a> {
     flags: u32,
@@ -124,6 +136,39 @@ pub struct Formatter<'a> {
     args: &'a [ArgumentV1<'a>],
 }
 
+/// A struct to represent both where to emit formatting strings to and how they
+/// should be formatted. A mutable version of this is passed to all formatting
+/// traits.
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+pub struct Formatter<'a> {
+    buf: &'a mut (Write+'a),
+    params: Option<&'a FormatParams>,
+}
+
+#[cfg(not(stage0))]
+#[derive(Copy, Clone)]
+struct FormatParams {
+    fill: char,
+    flags: u32,
+    align: rt::v2::Alignment,
+    precision: Option<usize>,
+    width: Option<usize>,
+}
+
+#[cfg(not(stage0))]
+impl Default for FormatParams {
+    fn default() -> FormatParams {
+        FormatParams {
+            fill: ' ',
+            flags: 0,
+            align: Alignment::Unknown,
+            precision: None,
+            width: None,
+        }
+    }
+}
+
 // NB. Argument is essentially an optimized partially applied formatting function,
 // equivalent to `exists T.(&T, fn(&T, &mut Formatter) -> Result`.
 
@@ -133,6 +178,7 @@ enum Void {}
 /// family of functions. It contains a function to format the given value. At
 /// compile time it is ensured that the function and the value have the correct
 /// types, and then this struct is used to canonicalize arguments to one type.
+#[cfg(stage0)]
 #[derive(Copy)]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(hidden)]
@@ -141,12 +187,14 @@ pub struct ArgumentV1<'a> {
     formatter: fn(&Void, &mut Formatter) -> Result,
 }
 
+#[cfg(stage0)]
 impl<'a> Clone for ArgumentV1<'a> {
     fn clone(&self) -> ArgumentV1<'a> {
         *self
     }
 }
 
+#[cfg(stage0)]
 impl<'a> ArgumentV1<'a> {
     #[inline(never)]
     fn show_usize(x: &usize, f: &mut Formatter) -> Result {
@@ -185,6 +233,7 @@ impl<'a> ArgumentV1<'a> {
 #[allow(dead_code)] // SignMinus isn't currently used
 enum FlagV1 { SignPlus, SignMinus, Alternate, SignAwareZeroPad, }
 
+#[cfg(stage0)]
 impl<'a> Arguments<'a> {
     /// When using the format_args!() macro, this function is used to generate the
     /// Arguments structure.
@@ -218,6 +267,34 @@ impl<'a> Arguments<'a> {
     }
 }
 
+#[cfg(not(stage0))]
+impl<'a> Arguments<'a> {
+    #[inline]
+    fn count(self) -> usize {
+        // XXX: I'm not sure this code is safe. self.0.spec.count has type
+        // Count0, so perhaps the compiler assumes that a read of it always
+        // produces 0, even if the result is then transmuted. Does transmuting
+        // a reference avoid this problem? From what I've read/heard, Rust
+        // doesn't do TBAA.
+        let count: CountUniform = unsafe { mem::transmute(self.0.spec.count) };
+        count as usize
+    }
+
+    #[inline]
+    fn uniform_args(self: Arguments<'a>) -> &'a ArgumentsBufUniform<'a> {
+        // XXX: DSTs and slices seem to have the same representation, but is
+        // that guaranteed?
+        unsafe { mem::transmute(raw::Slice { data: self.0, len: self.count() }) }
+    }
+
+    #[inline]
+    fn uniform_spec(self: Arguments<'a>) -> &'a ArgumentsSpecUniform<'a> {
+        // XXX: DSTs and slices seem to have the same representation, but is
+        // that guaranteed?
+        unsafe { mem::transmute(raw::Slice { data: self.0.spec, len: self.count() }) }
+    }
+}
+
 /// This structure represents a safely precompiled version of a format string
 /// and its arguments. This cannot be generated at runtime because it cannot
 /// safely be done so, so no constructors are given and the fields are private
@@ -227,6 +304,7 @@ impl<'a> Arguments<'a> {
 /// and pass it to a function or closure, passed as the first argument. The
 /// macro validates the format string at compile-time so usage of the `write`
 /// and `format` functions can be safely performed.
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[derive(Copy, Clone)]
 pub struct Arguments<'a> {
@@ -239,6 +317,83 @@ pub struct Arguments<'a> {
     // Dynamic arguments for interpolation, to be interleaved with string
     // pieces. (Every argument is preceded by a string piece.)
     args: &'a [ArgumentV1<'a>],
+}
+
+// XXX: The number of fmt::rt::v2::Count{} types should agree with the number
+// of fmt::CountUniform enumerators.
+#[cfg(not(stage0))]
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+enum CountUniform {
+    Value0 = 0,
+    Value1 = 1,
+    Value2 = 2,
+    Value3 = 3,
+    Value4 = 4,
+    Value5 = 5,
+    Value6 = 6,
+    Value7 = 7,
+    Value8 = 8,
+    Value9 = 9,
+    Value10 = 10,
+    Value11 = 11,
+    Value12 = 12,
+    Value13 = 13,
+    Value14 = 14,
+    Value15 = 15,
+    Value16 = 16,
+    Value17 = 17,
+    Value18 = 18,
+    Value19 = 19,
+    Value20 = 20,
+    Value21 = 21,
+    Value22 = 22,
+    Value23 = 23,
+    Value24 = 24,
+    Value25 = 25,
+    Value26 = 26,
+    Value27 = 27,
+    Value28 = 28,
+    Value29 = 29,
+    Value30 = 30,
+    Value31 = 31,
+    Value32 = 32,
+}
+
+#[cfg(not(stage0))]
+struct ArgumentsSpecUniform<'a> {
+    #[allow(dead_code)]
+    count: CountUniform,
+    trailing: &'a str,
+    args: [rt::v2::ArgumentsSpecItem<'a, Void>],
+}
+
+#[cfg(not(stage0))]
+struct ArgumentsBufUniform<'a> {
+    #[allow(dead_code)]
+    spec: &'a Void,
+    args: [&'a Void],
+}
+
+/// This structure represents a safely precompiled version of a format string
+/// and its arguments.
+///
+/// The `format_args!` macro will safely create an instance of this structure
+/// and pass it to a function or closure, passed as the first argument. The
+/// macro validates the format string at compile-time so usage of the `write`
+/// and `format` functions can be safely performed.
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+#[derive(Copy, Clone)]
+pub struct Arguments<'a>(&'a rt::v2::ArgumentsBuf<'a, ()>);
+
+#[cfg(not(stage0))]
+impl<'a, T: rt::v2::ArgumentsTuple<'a>+'a> rt::v2::ArgumentsBuf<'a, T> {
+    #[doc(hidden)] #[inline]
+    #[unstable(feature = "core", reason = "internal to format_args!")]
+    pub fn to_arguments(&'a self) -> Arguments<'a> {
+        Arguments( unsafe { mem::transmute(self) })
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -344,6 +499,7 @@ pub trait UpperExp {
 ///
 ///   * output - the buffer to write output to
 ///   * args - the precompiled arguments generated by `format_args!`
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn write(output: &mut Write, args: Arguments) -> Result {
     let mut formatter = Formatter {
@@ -388,11 +544,51 @@ pub fn write(output: &mut Write, args: Arguments) -> Result {
     Ok(())
 }
 
+/// The `write` function takes an output stream and an opaque `Arguments` value
+/// representing a format string and a list of arguments. The arguments will be
+/// formatted according to the specified format string into the output stream
+/// provided.
+///
+/// # Arguments
+///
+///   * output - the buffer to write output to
+///   * args - the precompiled arguments generated by `format_args!`
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+pub fn write(output: &mut Write, args: Arguments) -> Result {
+    let count = args.count();
+    let spec = args.uniform_spec();
+    let args = args.uniform_args();
+    for i in 0..count {
+        let arg_piece = unsafe { (*spec.args.get_unchecked(i)).piece };
+        let arg_func = unsafe { (*spec.args.get_unchecked(i)).vtable.fmt };
+        let arg_val = unsafe { *args.args.get_unchecked(i) };
+        try!(output.write_str(arg_piece));
+        let mut fmt = Formatter {
+            buf: output,
+            params: None,
+        };
+        try!(arg_func(arg_val, &mut fmt));
+    }
+    output.write_str(spec.trailing)
+}
+
+#[cfg(not(stage0))]
+macro_rules! get_param {
+    ($params:expr, $name:ident, $default:expr) => ((
+        match $params {
+            None => $default,
+            Some(ref params) => params.$name
+        }
+    ))
+}
+
 impl<'a> Formatter<'a> {
 
     // First up is the collection of functions used to execute a format string
     // at runtime. This consumes all of the compile-time statics generated by
     // the format! syntax extension.
+    #[cfg(stage0)]
     fn run(&mut self, arg: &rt::v1::Argument) -> Result {
         // Fill in the format parameters into the formatter
         self.fill = arg.format.fill;
@@ -411,6 +607,7 @@ impl<'a> Formatter<'a> {
         (value.formatter)(value.value, self)
     }
 
+    #[cfg(stage0)]
     fn getcount(&mut self, cnt: &rt::v1::Count) -> Option<usize> {
         match *cnt {
             rt::v1::Count::Is(n) => Some(n),
@@ -440,6 +637,7 @@ impl<'a> Formatter<'a> {
     ///
     /// This function will correctly account for the flags provided as well as
     /// the minimum width. It will not take precision into account.
+    #[cfg(stage0)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn pad_integral(&mut self,
                         is_positive: bool,
@@ -504,6 +702,103 @@ impl<'a> Formatter<'a> {
         }
     }
 
+    /// Performs the correct padding for an integer which has already been
+    /// emitted into a str. The str should *not* contain the sign for the
+    /// integer, that will be added by this method.
+    ///
+    /// # Arguments
+    ///
+    /// * is_positive - whether the original integer was positive or not.
+    /// * prefix - if the '#' character (Alternate) is provided, this
+    ///   is the prefix to put in front of the number.
+    /// * buf - the byte array that the number has been formatted into
+    ///
+    /// This function will correctly account for the flags provided as well as
+    /// the minimum width. It will not take precision into account.
+    #[cfg(not(stage0))]
+    #[inline]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub fn pad_integral(&mut self,
+                        is_positive: bool,
+                        prefix: &str,
+                        buf: &str)
+                        -> Result {
+        match self.params {
+            None => {
+                // Inlined fast path
+                if !is_positive {
+                    try!(self.buf.write_str("-"));
+                }
+                self.buf.write_str(buf)
+            }
+            Some(params) => self.pad_integral_slow(params, is_positive, prefix, buf)
+        }
+    }
+
+    #[cfg(not(stage0))]
+    fn pad_integral_slow(&mut self,
+                         params: &FormatParams,
+                         is_positive: bool,
+                         prefix: &str,
+                         buf: &str)
+                         -> Result {
+        use char::CharExt;
+
+        let mut width = buf.len();
+
+        let mut sign = None;
+        if !is_positive {
+            sign = Some('-'); width += 1;
+        } else if params.flags & (1 << (FlagV1::SignPlus as u32)) != 0 {
+            sign = Some('+'); width += 1;
+        }
+
+        let mut prefixed = false;
+        if params.flags & (1 << (FlagV1::Alternate as u32)) != 0 {
+            prefixed = true; width += prefix.char_len();
+        }
+
+        // Writes the sign if it exists, and then the prefix if it was requested
+        let write_prefix = |f: &mut Formatter| {
+            if let Some(c) = sign {
+                let mut b = [0; 4];
+                let n = c.encode_utf8(&mut b).unwrap_or(0);
+                let b = unsafe { str::from_utf8_unchecked(&b[..n]) };
+                try!(f.buf.write_str(b));
+            }
+            if prefixed { f.buf.write_str(prefix) }
+            else { Ok(()) }
+        };
+
+        // The `width` field is more of a `min-width` parameter at this point.
+        match params.width {
+            // If there's no minimum length requirements then we can just
+            // write the bytes.
+            None => {
+                try!(write_prefix(self)); self.buf.write_str(buf)
+            }
+            // Check if we're over the minimum width, if so then we can also
+            // just write the bytes.
+            Some(min) if width >= min => {
+                try!(write_prefix(self)); self.buf.write_str(buf)
+            }
+            // The sign and prefix goes before the padding if the fill character
+            // is zero
+            Some(min) if params.flags & (1 << (FlagV1::SignAwareZeroPad as u32)) != 0 => {
+                try!(write_prefix(self));
+                self.with_padding(params, min - width, Alignment::Right, '0', |f| {
+                    f.buf.write_str(buf)
+                })
+            }
+            // Otherwise, the sign and prefix goes after the padding
+            Some(min) => {
+                self.with_padding(params,min - width, Alignment::Right, params.fill, |f| {
+                    try!(write_prefix(f)); f.buf.write_str(buf)
+                })
+            }
+        }
+    }
+
     /// This function takes a string slice and emits it to the internal buffer
     /// after applying the relevant formatting flags specified. The flags
     /// recognized for generic strings are:
@@ -515,6 +810,7 @@ impl<'a> Formatter<'a> {
     ///               is longer than this length
     ///
     /// Notably this function ignored the `flag` parameters
+    #[cfg(stage0)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn pad(&mut self, s: &str) -> Result {
         // Make sure there's a fast path up front
@@ -556,8 +852,68 @@ impl<'a> Formatter<'a> {
         }
     }
 
+    /// This function takes a string slice and emits it to the internal buffer
+    /// after applying the relevant formatting flags specified. The flags
+    /// recognized for generic strings are:
+    ///
+    /// * width - the minimum width of what to emit
+    /// * fill/align - what to emit and where to emit it if the string
+    ///                provided needs to be padded
+    /// * precision - the maximum length to emit, the string is truncated if it
+    ///               is longer than this length
+    ///
+    /// Notably this function ignored the `flag` parameters
+    #[cfg(not(stage0))]
+    #[inline]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub fn pad(&mut self, s: &str) -> Result {
+        match self.params {
+            None => self.buf.write_str(s),
+            Some(params) => self.pad_slow(params, s),
+        }
+    }
+
+    #[cfg(not(stage0))]
+    fn pad_slow(&mut self, params: &FormatParams, s: &str) -> Result {
+        // The `precision` field can be interpreted as a `max-width` for the
+        // string being formatted
+        match params.precision {
+            Some(max) => {
+                // If there's a maximum width and our string is longer than
+                // that, then we must always have truncation. This is the only
+                // case where the maximum length will matter.
+                let char_len = s.char_len();
+                if char_len >= max {
+                    let nchars = ::cmp::min(max, char_len);
+                    return self.buf.write_str(s.slice_chars(0, nchars));
+                }
+            }
+            None => {}
+        }
+        // The `width` field is more of a `min-width` parameter at this point.
+        match params.width {
+            // If we're under the maximum length, and there's no minimum length
+            // requirements, then we can just emit the string
+            None => self.buf.write_str(s),
+            // If we're under the maximum width, check if we're over the minimum
+            // width, if so it's as easy as just emitting the string.
+            Some(width) if s.char_len() >= width => {
+                self.buf.write_str(s)
+            }
+            // If we're under both the maximum and the minimum width, then fill
+            // up the minimum width with the specified string + some alignment.
+            Some(width) => {
+                self.with_padding(params, width - s.char_len(), Alignment::Left,
+                                  params.fill, |me| {
+                    me.buf.write_str(s)
+                })
+            }
+        }
+    }
+
     /// Runs a callback, emitting the correct padding either before or
     /// afterwards depending on whether right or left alignment is requested.
+    #[cfg(stage0)]
     fn with_padding<F>(&mut self, padding: usize, default: Alignment,
                        f: F) -> Result
         where F: FnOnce(&mut Formatter) -> Result,
@@ -591,6 +947,46 @@ impl<'a> Formatter<'a> {
         Ok(())
     }
 
+    /// Runs a callback, emitting the correct padding either before or
+    /// afterwards depending on whether right or left alignment is requested.
+    #[cfg(not(stage0))]
+    fn with_padding<F>(&mut self,
+                       params: &FormatParams,
+                       padding: usize,
+                       default: Alignment,
+                       fill: char,
+                       f: F) -> Result
+        where F: FnOnce(&mut Formatter) -> Result,
+    {
+        use char::CharExt;
+        let align = match params.align {
+            Alignment::Unknown => default,
+            _ => params.align
+        };
+
+        let (pre_pad, post_pad) = match align {
+            Alignment::Left => (0, padding),
+            Alignment::Right | Alignment::Unknown => (padding, 0),
+            Alignment::Center => (padding / 2, (padding + 1) / 2),
+        };
+
+        let mut fill_str = [0; 4];
+        let len = fill.encode_utf8(&mut fill_str).unwrap_or(0);
+        let fill_str = unsafe { str::from_utf8_unchecked(&fill_str[..len]) };
+
+        for _ in 0..pre_pad {
+            try!(self.buf.write_str(fill_str));
+        }
+
+        try!(f(self));
+
+        for _ in 0..post_pad {
+            try!(self.buf.write_str(fill_str));
+        }
+
+        Ok(())
+    }
+
     /// Writes some data to the underlying buffer contained within this
     /// formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -605,24 +1001,49 @@ impl<'a> Formatter<'a> {
     }
 
     /// Flags for formatting (packed version of rt::Flag)
+    #[cfg(stage0)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn flags(&self) -> u32 { self.flags }
+    /// Flags for formatting (packed version of rt::Flag)
+    #[cfg(not(stage0))]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub fn flags(&self) -> u32 { get_param!(self.params, flags, 0) }
 
     /// Character used as 'fill' whenever there is alignment
+    #[cfg(stage0)]
     #[unstable(feature = "core", reason = "method was just created")]
     pub fn fill(&self) -> char { self.fill }
+    /// Character used as 'fill' whenever there is alignment
+    #[cfg(not(stage0))]
+    #[unstable(feature = "core", reason = "method was just created")]
+    pub fn fill(&self) -> char { get_param!(self.params, fill, ' ') }
 
     /// Flag indicating what form of alignment was requested
+    #[cfg(stage0)]
     #[unstable(feature = "core", reason = "method was just created")]
     pub fn align(&self) -> Alignment { self.align }
+    /// Flag indicating what form of alignment was requested
+    #[cfg(not(stage0))]
+    #[unstable(feature = "core", reason = "method was just created")]
+    pub fn align(&self) -> Alignment { get_param!(self.params, align, Alignment::Unknown) }
 
     /// Optionally specified integer width that the output should be
+    #[cfg(stage0)]
     #[unstable(feature = "core", reason = "method was just created")]
     pub fn width(&self) -> Option<usize> { self.width }
+    /// Optionally specified integer width that the output should be
+    #[cfg(not(stage0))]
+    #[unstable(feature = "core", reason = "method was just created")]
+    pub fn width(&self) -> Option<usize> { get_param!(self.params, width, None) }
 
     /// Optionally specified precision for numeric types
+    #[cfg(stage0)]
     #[unstable(feature = "core", reason = "method was just created")]
     pub fn precision(&self) -> Option<usize> { self.precision }
+    /// Optionally specified precision for numeric types
+    #[cfg(not(stage0))]
+    #[unstable(feature = "core", reason = "method was just created")]
+    pub fn precision(&self) -> Option<usize> { get_param!(self.params, precision, None) }
 
     /// Creates a `DebugStruct` builder designed to assist with creation of
     /// `fmt::Debug` implementations for structs.
@@ -790,6 +1211,45 @@ macro_rules! fmt_refs {
 
 fmt_refs! { Debug, Display, Octal, Binary, LowerHex, UpperHex, LowerExp, UpperExp }
 
+#[cfg(not(stage0))]
+macro_rules! formatted_arg_adapter {
+    ($($tr:ident),*) => {
+        $(
+        impl<'a, T: $tr + 'a> $tr for rt::v2::FormattedArg<'a, T> {
+            fn fmt(&self, f: &mut Formatter) -> Result {
+                $tr::fmt(self.arg, &mut Formatter {
+                    buf: f.buf,
+                    params: Some(&self.to_format_params()),
+                })
+            }
+        }
+        )*
+    }
+}
+
+#[cfg(not(stage0))]
+formatted_arg_adapter! { Debug, Display, Octal, Binary, LowerHex, UpperHex, LowerExp, UpperExp }
+
+#[cfg(not(stage0))]
+impl<'a, T: 'a> rt::v2::FormattedArg<'a, T> {
+    #[inline]
+    fn to_format_params(&self) -> FormatParams {
+        fn get_count(spec: rt::v2::Count, val: usize) -> Option<usize> {
+            match spec {
+                rt::v2::Count::Implied => None,
+                rt::v2::Count::NextParam => Some(val)
+            }
+        }
+        FormatParams {
+            fill: self.spec.fill,
+            flags: self.spec.flags,
+            align: self.spec.align,
+            width: get_count(self.spec.width, self.width),
+            precision: get_count(self.spec.precision, self.precision),
+        }
+    }
+}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Debug for bool {
     fn fmt(&self, f: &mut Formatter) -> Result {
@@ -844,6 +1304,7 @@ impl Display for char {
     }
 }
 
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Pointer for *const T {
     fn fmt(&self, f: &mut Formatter) -> Result {
@@ -851,6 +1312,22 @@ impl<T> Pointer for *const T {
         let ret = LowerHex::fmt(&(*self as usize), f);
         f.flags &= !(1 << (FlagV1::Alternate as u32));
         ret
+    }
+}
+
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T> Pointer for *const T {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        let mut params = match f.params {
+            None => Default::default(),
+            Some(params) => *params
+        };
+        params.flags |= 1 << (FlagV1::Alternate as u32);
+        LowerHex::fmt(&(*self as usize), &mut Formatter {
+            buf: f.buf,
+            params: Some(&params)
+        })
     }
 }
 
@@ -895,7 +1372,7 @@ macro_rules! floating { ($ty:ident) => {
         fn fmt(&self, fmt: &mut Formatter) -> Result {
             use num::Float;
 
-            let digits = match fmt.precision {
+            let digits = match fmt.precision() {
                 Some(i) => float::DigExact(i),
                 None => float::DigMax(6),
             };
@@ -917,7 +1394,7 @@ macro_rules! floating { ($ty:ident) => {
         fn fmt(&self, fmt: &mut Formatter) -> Result {
             use num::Float;
 
-            let digits = match fmt.precision {
+            let digits = match fmt.precision() {
                 Some(i) => float::DigExact(i),
                 None => float::DigMax(6),
             };
@@ -939,7 +1416,7 @@ macro_rules! floating { ($ty:ident) => {
         fn fmt(&self, fmt: &mut Formatter) -> Result {
             use num::Float;
 
-            let digits = match fmt.precision {
+            let digits = match fmt.precision() {
                 Some(i) => float::DigExact(i),
                 None => float::DigMax(6),
             };

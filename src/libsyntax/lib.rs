@@ -118,6 +118,7 @@ pub mod ext {
     pub mod env;
     pub mod expand;
     pub mod format;
+    pub mod format2;
     pub mod log_syntax;
     pub mod mtwt;
     pub mod quote;
