@@ -563,14 +563,25 @@ pub fn write(output: &mut Write, args: Arguments) -> Result {
         let arg_piece = unsafe { (*spec.args.get_unchecked(i)).piece };
         let arg_func = unsafe { (*spec.args.get_unchecked(i)).vtable.fmt };
         let arg_val = unsafe { *args.args.get_unchecked(i) };
-        try!(output.write_str(arg_piece));
+        // The `write_str` call is (1) dispatched dynamically and (2) may
+        // otherwise be expensive. The piece is probably not empty, though,
+        // so it's not clear whether it should check or not.
+        if !arg_piece.is_empty() {
+            try!(output.write_str(arg_piece));
+        }
         let mut fmt = Formatter {
             buf: output,
             params: None,
         };
         try!(arg_func(arg_val, &mut fmt));
     }
-    output.write_str(spec.trailing)
+    // Unlike above, format specs frequently end with no trailing piece, so
+    // checking whether the piece is empty is clearly the right behavior.
+    let trailing = spec.trailing;
+    if !trailing.is_empty() {
+        try!(output.write_str(trailing));
+    }
+    Ok(())
 }
 
 #[cfg(not(stage0))]
