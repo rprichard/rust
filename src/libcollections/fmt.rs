@@ -442,9 +442,33 @@ use string;
 /// let s = fmt::format(format_args!("Hello, {}!", "world"));
 /// assert_eq!(s, "Hello, world!".to_string());
 /// ```
+#[cfg(stage0)]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn format(args: Arguments) -> string::String {
     let mut output = string::String::new();
     let _ = output.write_fmt(args);
     output
+}
+
+/// The format function takes a precompiled format string and a list of
+/// arguments, to return the resulting formatted string.
+///
+/// # Arguments
+///
+///   * args - a structure of arguments generated via the `format_args!` macro.
+///
+/// # Examples
+///
+/// ```
+/// use std::fmt;
+///
+/// let s = fmt::format(format_args!("Hello, {}!", "world"));
+/// assert_eq!(s, "Hello, world!".to_string());
+/// ```
+#[cfg(not(stage0))]
+#[stable(feature = "rust1", since = "1.0.0")]
+#[inline]
+pub fn format(args: Arguments) -> string::String {
+    use string::ToString;
+    args.to_string()
 }

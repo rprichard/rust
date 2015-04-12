@@ -24,6 +24,8 @@ use mem;
 use option::Option;
 use option::Option::{Some, None};
 use result::Result::Ok;
+#[cfg(not(stage0))]
+use ops::Add;
 use ops::{Deref, FnOnce};
 use raw;
 use result;
@@ -146,6 +148,18 @@ pub struct Formatter<'a> {
     params: Option<&'a FormatParams>,
 }
 
+/// A struct representing how an argument should be formatted.
+#[cfg(not(stage0))]
+#[unstable(feature = "fmt_size_hint", reason = "type was just created")]
+pub struct FormatterParams<'a> {
+    params: Option<&'a FormatParams>,
+}
+
+/// A `FormatterParams` constant representing no formatting parameters.
+#[cfg(not(stage0))]
+#[unstable(feature = "fmt_size_hint", reason = "const was just created")]
+pub const NO_FORMATTER_PARAMS: FormatterParams<'static> = FormatterParams { params: None };
+
 #[cfg(not(stage0))]
 #[derive(Copy, Clone)]
 struct FormatParams {
@@ -165,6 +179,48 @@ impl Default for FormatParams {
             align: Alignment::Unknown,
             precision: None,
             width: None,
+        }
+    }
+}
+
+/// An optional hint that a formatting trait implementation may provide to
+/// improve `format!` and `ToString` allocation efficiency.
+#[cfg(not(stage0))]
+#[derive(Copy, Clone)]
+#[unstable(feature = "fmt_size_hint", reason = "type was just created")]
+pub struct SizeHint {
+    /// The formatted argument will be at least this large.
+    #[unstable(feature = "core", reason = "internal field")]
+    pub min: usize,
+    /// If `exact` is true, then `min` is not just the minimum, but an exact
+    /// bound.
+    #[unstable(feature = "core", reason = "internal field")]
+    pub exact: bool,
+}
+
+#[cfg(not(stage0))]
+impl SizeHint {
+    /// Return a `SizeHint` representing an exact size.
+    #[inline]
+    #[unstable(feature = "fmt_size_hint", reason = "function was just created")]
+    pub fn exact(size: usize) -> SizeHint {
+        SizeHint { min: size, exact: true }
+    }
+}
+
+/// A `SizeHint` constant representing no information.
+#[cfg(not(stage0))]
+#[unstable(feature = "fmt_size_hint", reason = "const was just created")]
+pub const UNKNOWN_SIZE: SizeHint = SizeHint { min: 0, exact: false };
+
+#[cfg(not(stage0))]
+impl Add for SizeHint {
+    type Output = SizeHint;
+    #[inline]
+    fn add(self, other: SizeHint) -> SizeHint {
+        SizeHint {
+            min: self.min + other.min,
+            exact: self.exact && other.exact
         }
     }
 }
@@ -401,12 +457,38 @@ impl<'a> Debug for Arguments<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result {
         Display::fmt(self, fmt)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        Display::size_hint(self, p)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Display for Arguments<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result {
         write(fmt.buf, *self)
+    }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint {
+        let count = self.count();
+        let spec = self.uniform_spec();
+        let args = self.uniform_args();
+
+        let mut hint_args = SizeHint::exact(0);
+        let mut hint_pieces = spec.trailing.len();
+
+        for i in 0..count {
+            let arg_piece = unsafe { (*spec.args.get_unchecked(i)).piece };
+            let arg_func = unsafe { (*spec.args.get_unchecked(i)).vtable.size_hint };
+            let arg_val = unsafe { *args.args.get_unchecked(i) };
+
+            hint_pieces += arg_piece.len();
+            hint_args = hint_args + arg_func(arg_val, NO_FORMATTER_PARAMS);
+        }
+
+        SizeHint::exact(hint_pieces) + hint_args
     }
 }
 
@@ -421,6 +503,11 @@ pub trait Debug {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// When a value can be semantically expressed as a String, this trait may be
@@ -433,6 +520,11 @@ pub trait Display {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `o` character
@@ -441,6 +533,11 @@ pub trait Octal {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `b` character
@@ -449,6 +546,11 @@ pub trait Binary {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `x` character
@@ -457,6 +559,11 @@ pub trait LowerHex {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `X` character
@@ -465,6 +572,11 @@ pub trait UpperHex {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `p` character
@@ -473,6 +585,11 @@ pub trait Pointer {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `e` character
@@ -481,6 +598,11 @@ pub trait LowerExp {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// Format trait for the `E` character
@@ -489,6 +611,11 @@ pub trait UpperExp {
     /// Formats the value using the given formatter.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fmt(&self, &mut Formatter) -> Result;
+
+    /// Estimate the size of the output.
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just added")]
+    fn size_hint(&self, _p: FormatterParams) -> SizeHint { UNKNOWN_SIZE }
 }
 
 /// The `write` function takes an output stream, a precompiled format string,
@@ -599,7 +726,7 @@ impl<'a> Formatter<'a> {
     #[cfg(not(stage0))]
     #[unstable(feature = "core", reason = "method was just added and/or is internal to libstd")]
     #[inline]
-    pub fn new(buf: &'a mut (Write+'a)) -> Self {
+    pub fn new(buf: &'a mut (Write+'a)) -> Formatter<'a> {
         Formatter {
             buf: buf,
             params: None
@@ -1021,6 +1148,14 @@ impl<'a> Formatter<'a> {
         write(self.buf, fmt)
     }
 
+    /// Write a character to the underlying buffer.
+    fn write_char(&mut self, data: char) -> Result {
+        let mut buf = [0; 4];
+        let len = data.encode_utf8(&mut buf).unwrap_or(0);
+        let buf = unsafe { str::from_utf8_unchecked(&buf[..len]) };
+        self.write_str(buf)
+    }
+
     /// Flags for formatting (packed version of rt::Flag)
     #[cfg(stage0)]
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -1206,6 +1341,34 @@ impl<'a> Formatter<'a> {
     }
 }
 
+#[cfg(not(stage0))]
+impl<'a> FormatterParams<'a> {
+    /// Flags for formatting (packed version of rt::Flag)
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just created")]
+    pub fn flags(&self) -> u32 { get_param!(self.params, flags, 0) }
+
+    /// Character used as 'fill' whenever there is alignment
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just created")]
+    pub fn fill(&self) -> char { get_param!(self.params, fill, ' ') }
+
+    /// Flag indicating what form of alignment was requested
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just created")]
+    pub fn align(&self) -> Alignment { get_param!(self.params, align, Alignment::Unknown) }
+
+    /// Optionally specified integer width that the output should be
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just created")]
+    pub fn width(&self) -> Option<usize> { get_param!(self.params, width, None) }
+
+    /// Optionally specified precision for numeric types
+    #[cfg(not(stage0))]
+    #[unstable(feature = "fmt_size_hint", reason = "method was just created")]
+    pub fn precision(&self) -> Option<usize> { get_param!(self.params, precision, None) }
+}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> Result {
@@ -1221,10 +1384,16 @@ macro_rules! fmt_refs {
         #[stable(feature = "rust1", since = "1.0.0")]
         impl<'a, T: ?Sized + $tr> $tr for &'a T {
             fn fmt(&self, f: &mut Formatter) -> Result { $tr::fmt(&**self, f) }
+
+            #[cfg(not(stage0))]
+            fn size_hint(&self, p: FormatterParams) -> SizeHint { $tr::size_hint(&**self, p) }
         }
         #[stable(feature = "rust1", since = "1.0.0")]
         impl<'a, T: ?Sized + $tr> $tr for &'a mut T {
             fn fmt(&self, f: &mut Formatter) -> Result { $tr::fmt(&**self, f) }
+
+            #[cfg(not(stage0))]
+            fn size_hint(&self, p: FormatterParams) -> SizeHint { $tr::size_hint(&**self, p) }
         }
         )*
     }
@@ -1240,6 +1409,12 @@ macro_rules! formatted_arg_adapter {
             fn fmt(&self, f: &mut Formatter) -> Result {
                 $tr::fmt(self.arg, &mut Formatter {
                     buf: f.buf,
+                    params: Some(&self.to_format_params()),
+                })
+            }
+
+            fn size_hint(&self, _p: FormatterParams) -> SizeHint {
+                $tr::size_hint(self.arg, FormatterParams {
                     params: Some(&self.to_format_params()),
                 })
             }
@@ -1276,6 +1451,11 @@ impl Debug for bool {
     fn fmt(&self, f: &mut Formatter) -> Result {
         Display::fmt(self, f)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        Display::size_hint(self, p)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1283,16 +1463,21 @@ impl Display for bool {
     fn fmt(&self, f: &mut Formatter) -> Result {
         Display::fmt(if *self { "true" } else { "false" }, f)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        Display::size_hint(if *self { "true" } else { "false" }, p)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Debug for str {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        try!(write!(f, "\""));
+        try!(f.write_str("\""));
         for c in self.chars().flat_map(|c| c.escape_default()) {
-            try!(write!(f, "{}", c));
+            try!(f.write_char(c));
         }
-        write!(f, "\"")
+        f.write_str("\"")
     }
 }
 
@@ -1301,17 +1486,25 @@ impl Display for str {
     fn fmt(&self, f: &mut Formatter) -> Result {
         f.pad(self)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        match p.params {
+            None => SizeHint::exact(self.len()),
+            Some(_) => UNKNOWN_SIZE
+        }
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Debug for char {
     fn fmt(&self, f: &mut Formatter) -> Result {
         use char::CharExt;
-        try!(write!(f, "'"));
+        try!(f.write_str("'"));
         for c in self.escape_default() {
-            try!(write!(f, "{}", c));
+            try!(f.write_char(c));
         }
-        write!(f, "'")
+        f.write_str("'")
     }
 }
 
@@ -1322,6 +1515,14 @@ impl Display for char {
         let amt = self.encode_utf8(&mut utf8).unwrap_or(0);
         let s: &str = unsafe { mem::transmute(&utf8[..amt]) };
         Display::fmt(s, f)
+    }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        let mut utf8 = [0; 4];
+        let amt = self.encode_utf8(&mut utf8).unwrap_or(0);
+        let s: &str = unsafe { mem::transmute(&utf8[..amt]) };
+        Display::size_hint(s, p)
     }
 }
 
@@ -1340,15 +1541,20 @@ impl<T> Pointer for *const T {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Pointer for *const T {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        let mut params = match f.params {
-            None => Default::default(),
-            Some(params) => *params
-        };
+        let mut params = *f.params.unwrap_or(&Default::default());
         params.flags |= 1 << (FlagV1::Alternate as u32);
         LowerHex::fmt(&(*self as usize), &mut Formatter {
             buf: f.buf,
             params: Some(&params)
         })
+    }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        let mut params = *p.params.unwrap_or(&Default::default());
+        params.flags |= 1 << (FlagV1::Alternate as u32);
+        LowerHex::size_hint(&(*self as usize),
+                            FormatterParams { params: Some(&params) })
     }
 }
 
@@ -1359,6 +1565,13 @@ impl<T> Pointer for *mut T {
         #![allow(trivial_casts)]
         Pointer::fmt(&(*self as *const T), f)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        // FIXME(#23542) Replace with type ascription.
+        #![allow(trivial_casts)]
+        Pointer::size_hint(&(*self as *const T), p)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1368,6 +1581,13 @@ impl<'a, T> Pointer for &'a T {
         #![allow(trivial_casts)]
         Pointer::fmt(&(*self as *const T), f)
     }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        // FIXME(#23542) Replace with type ascription.
+        #![allow(trivial_casts)]
+        Pointer::size_hint(&(*self as *const T), p)
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1376,6 +1596,13 @@ impl<'a, T> Pointer for &'a mut T {
         // FIXME(#23542) Replace with type ascription.
         #![allow(trivial_casts)]
         Pointer::fmt(&(&**self as *const T), f)
+    }
+
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint {
+        // FIXME(#23542) Replace with type ascription.
+        #![allow(trivial_casts)]
+        Pointer::size_hint(&(*self as *const T), p)
     }
 }
 
@@ -1462,10 +1689,14 @@ floating! { f64 }
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Debug for *const T {
     fn fmt(&self, f: &mut Formatter) -> Result { Pointer::fmt(self, f) }
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint { Pointer::size_hint(self, p) }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Debug for *mut T {
     fn fmt(&self, f: &mut Formatter) -> Result { Pointer::fmt(self, f) }
+    #[cfg(not(stage0))]
+    fn size_hint(&self, p: FormatterParams) -> SizeHint { Pointer::size_hint(self, p) }
 }
 
 macro_rules! peel {
@@ -1479,20 +1710,20 @@ macro_rules! tuple {
         impl<$($name:Debug),*> Debug for ($($name,)*) {
             #[allow(non_snake_case, unused_assignments)]
             fn fmt(&self, f: &mut Formatter) -> Result {
-                try!(write!(f, "("));
+                try!(f.write_str("("));
                 let ($(ref $name,)*) = *self;
                 let mut n = 0;
                 $(
                     if n > 0 {
-                        try!(write!(f, ", "));
+                        try!(f.write_str(", "));
                     }
                     try!(write!(f, "{:?}", *$name));
                     n += 1;
                 )*
                 if n == 1 {
-                    try!(write!(f, ","));
+                    try!(f.write_str(","));
                 }
-                write!(f, ")")
+                f.write_str(")")
             }
         }
         peel! { $($name,)* }

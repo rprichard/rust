@@ -17,6 +17,8 @@
 use core::prelude::*;
 
 use core::default::Default;
+#[cfg(not(stage0))]
+use core::cmp;
 use core::fmt;
 use core::hash;
 use core::iter::{IntoIterator, FromIterator};
@@ -1012,13 +1014,38 @@ impl<T: fmt::Display + ?Sized> ToString for T {
 #[cfg(not(stage0))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: fmt::Display + ?Sized> ToString for T {
-    #[inline]
     fn to_string(&self) -> String {
-        let mut buf = String::new();
+        let hint = fmt::Display::size_hint(self, fmt::NO_FORMATTER_PARAMS);
+        let amount = if hint.exact {
+            hint.min
+        } else {
+            // We already expect to allocate `hint.min` of memory, and we're
+            // usually OK allocating twice as much as necessary temporarily
+            // (before we shrink to fit), so double the minimum size and hope
+            // we don't have to double again. However, if the hint is "very
+            // big", don't double it.
+            //
+            // On the other hand, if the hint is small, then we can waste time
+            // doubling the buffer. Without a precise hint, we are likely to
+            // reallocate the buffer at the end, to shrink it, so we may as
+            // well waste a little space initially.
+            //
+            // FIXME: Consider deferring the buffer reservation until after the
+            // first write. It requires an adapter between `fmt::write` and the
+            // `String`. Perhaps it'd only be used with inexact hints.
+            cmp::max(cmp::min(hint.min, 1024 * 1024) * 2,
+                     cmp::max(128, hint.min))
+        };
+        let mut buf = String::with_capacity(amount);
         {
             let mut fmt = fmt::Formatter::new(&mut buf);
             let _ = fmt::Display::fmt(self, &mut fmt);
         }
+        debug_assert!(if hint.exact {
+            buf.len() == hint.min
+        } else {
+            buf.len() >= hint.min
+        });
         buf.shrink_to_fit();
         buf
     }

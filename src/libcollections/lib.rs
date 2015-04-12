@@ -29,6 +29,7 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 #![feature(core)]
+#![feature(fmt_size_hint)]
 #![feature(lang_items)]
 #![feature(staged_api)]
 #![feature(unboxed_closures)]

@@ -191,6 +191,11 @@ macro_rules! debug {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 fmt::Display::fmt(self, f)
             }
+
+            #[cfg(not(stage0))]
+            fn size_hint(&self, p: fmt::FormatterParams) -> fmt::SizeHint {
+                fmt::Display::size_hint(self, p)
+            }
         }
     }
 }

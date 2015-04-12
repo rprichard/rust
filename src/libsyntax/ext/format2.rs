@@ -691,10 +691,25 @@ mod trans {
                 ecx.ident_of(output.trait_),
                 ecx.ident_of("fmt"),
             ];
+            let hint_path = vec![
+                ecx.ident_of_std("core"),
+                ecx.ident_of("fmt"),
+                ecx.ident_of(output.trait_),
+                ecx.ident_of("size_hint"),
+            ];
             let fmt_expr = ecx.expr_path(ecx.path_global(in_sp, fmt_path));
+            // Using the `macsp` span here for the
+            // `core::fmt::<trait>::size_hint` path is necessary because
+            // `size_hint` is currently unstable, but it produces terrible
+            // diagnostics. Not only are there duplicate errors when the
+            // argument doesn't implement a trait, the `size_hint` form of the
+            // error points at the `format_args!` call site (which is
+            // frequently inside another libstd macro).
+            let hint_expr = ecx.expr_path(ecx.path_global(macsp, hint_path));
             let path = ecx.path_global(macsp, rtpath(ecx, "ArgumentVTable"));
             let vtable = ecx.expr_struct(macsp, path, vec![
                 ecx.field_imm(macsp, ecx.ident_of("fmt"), fmt_expr),
+                ecx.field_imm(macsp, ecx.ident_of("size_hint"), hint_expr),
             ]);
             let path = ecx.path_global(macsp, rtpath(ecx, "ArgumentsSpecItem"));
             let piece = ecx.expr_str(fmtsp, output.literal.clone());

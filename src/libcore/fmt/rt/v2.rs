@@ -14,7 +14,7 @@
 // Argument vector dispatch
 //
 
-use fmt::{Formatter, Result};
+use fmt::{Formatter, FormatterParams, Result, SizeHint};
 
 pub struct ArgumentsBuf<'a, T: ArgumentsTuple<'a>+'a> {
     pub spec: &'a ArgumentsSpec<'a, T>,
@@ -39,10 +39,9 @@ pub struct ArgumentsSpecItem<'a, T> {
 
 pub struct ArgumentVTable<T> {
     pub fmt: fn(&T, &mut Formatter) -> Result,
-    // XXX: not implemented yet...
-    // TODO: There's a strong possibility that enabling this field will result
+    // FIXME: There's a strong possibility that enabling this field will result
     // in a duplicated diagnostic.
-    //pub size_hint: fn(&T, &Formatter) -> usize,
+    pub size_hint: fn(&T, FormatterParams) -> SizeHint,
 }
 
 macro_rules! args_peel {
